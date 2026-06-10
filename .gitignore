@@ -1,0 +1,79 @@
+# ========================
+# MAVEN
+# ========================
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ========================
+# SECRETS — NEVER PUSH
+# ========================
+.env
+*.env
+.env.local
+.env.*.local
+
+# ========================
+# INTELLIJ IDEA
+# ========================
+.idea/
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+
+# ========================
+# ECLIPSE
+# ========================
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# ========================
+# NETBEANS
+# ========================
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ========================
+# VS CODE
+# ========================
+.vscode/
+
+# ========================
+# OS FILES
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# DOCKER VOLUME DATA
+# ========================
+mongo-data/
+postgres-order/
+postgres-inventory/
+mysql_keycloak_data/
+grafana/
+prometheus/
+untitled/
+realms/
+
+# ========================
+# LOGS
+# ========================
+*.log
+logs/

@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -30,15 +32,29 @@ public class OrderController {
     @CircuitBreaker(name = "inventory", fallbackMethod = "inventoryFallback")
     @TimeLimiter(name = "inventory")
     @Retry(name = "inventory")
-    public CompletableFuture<String> placeOrder(@RequestBody @Valid OrderRequest orderRequest) {
-       return CompletableFuture.supplyAsync(()->orderService.placeOrder(orderRequest));
+    public CompletableFuture<OrderResponse> placeOrder(@RequestBody @Valid OrderRequest orderRequest) {
+        RequestAttributes requestAttributes = RequestContextHolder.currentRequestAttributes();
 
+        return CompletableFuture.supplyAsync(() -> {
+            RequestContextHolder.setRequestAttributes(requestAttributes);
+            try {
+                return orderService.placeOrder(orderRequest);
+            } finally {
+                RequestContextHolder.resetRequestAttributes();
+            }
+        });
     }
 
-    public CompletableFuture<String> inventoryFallback(OrderRequest orderRequest, Throwable throwable) {
+    public CompletableFuture<OrderResponse> inventoryFallback(OrderRequest orderRequest, Throwable throwable) {
         log.error("Fallback triggered. Cause: {}", throwable.getMessage(), throwable); // ← see real error
-        return CompletableFuture.supplyAsync(() -> "Failed to place order...");
+        return CompletableFuture.supplyAsync(() ->
+                OrderResponse.builder()
+                        .status(OrderStatus.CANCELLED)
+                        .build()
+        );
     }
+
+
 
     @GetMapping
     public List<OrderResponse> getAllOrders(){

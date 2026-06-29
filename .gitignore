@@ -71,6 +71,9 @@ grafana/
 prometheus/
 untitled/
 realms/
+mysql-order/
+mysql-inventory/
+mysql-customer/
 
 # ========================
 # LOGS

@@ -30,6 +30,10 @@ public class Order {
 
     private BigDecimal totalPrice;
 
+    //razorpay fields
+    private String razorpayOrderId;
+    private String razorpayPaymentId;
+
     @OneToMany(cascade = CascadeType.ALL)
     private List<OrderLineItem> orderLineItemsList;
 

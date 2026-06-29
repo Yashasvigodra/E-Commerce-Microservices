@@ -18,6 +18,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeExchange(exchange -> exchange
                         .pathMatchers("/eureka/**").permitAll()
+                        .pathMatchers("/api/payments/webhook").permitAll()
                         .anyExchange().authenticated()
                 )
                 .oauth2ResourceServer(authserver -> authserver.jwt(Customizer.withDefaults()))

@@ -20,4 +20,8 @@ public class OrderResponse {
     private OrderStatus status;
     private BigDecimal totalPrice;
 
+    //razorpay specific fields
+    private String razorpayOrderId;   // ← client needs this to open payment UI
+    private Long amountInPaise;
+
 }

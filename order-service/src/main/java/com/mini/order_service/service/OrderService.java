@@ -8,14 +8,20 @@ import com.mini.order_service.event.OrderPlacedEvent;
 import com.mini.order_service.exceptions.CustomerNotFoundException;
 import com.mini.order_service.exceptions.InvalidOrderStateException;
 import com.mini.order_service.exceptions.OrderNotFoundException;
+import com.mini.order_service.exceptions.PaymentException;
 import com.mini.order_service.model.Order;
 import com.mini.order_service.model.OrderLineItem;
 import com.mini.order_service.model.OrderStatus;
 import com.mini.order_service.repository.OrderRepository;
+
+import com.razorpay.RazorpayClient;
+import com.razorpay.RazorpayException;
 import feign.FeignException;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.protocol.types.Field;
+import org.json.JSONObject;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +37,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class OrderService {
 
     private final OrderRepository orderRepository;
@@ -40,33 +47,125 @@ public class OrderService {
     private final Tracer tracer;
 
     private final KafkaTemplate<String,OrderPlacedEvent> kafkaTemplate;
+    private final RazorpayClient razorpayClient;
 
 
+//  ──────────────────────────────────────────────
+//    only validates customer , validare stock
+//    creates Razorpay order and saves as payment pending
 
-    public String placeOrder(OrderRequest orderRequest) {
+
+    public OrderResponse placeOrder(OrderRequest orderRequest) {
         CustomerResponse customer = validateAndFetchCustomer(orderRequest.getCustomerId());
         Order order = buildOrder(orderRequest);
         validateStock(order.getOrderLineItemsList());     // checks sufficient qty
-        reduceInventory(order.getOrderLineItemsList());   // ✅ actually deducts stock
+//        reduceInventory(order.getOrderLineItemsList());   // ✅ actually deducts stock
 
+
+//        creare razorpay order
+        String razorpayOrderId = createRazorpayOrder(order.getTotalPrice() , order.getOrderNumber());
+
+        order.setRazorpayOrderId(razorpayOrderId);
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
+        orderRepository.save(order);
+
+
+
+//        kafkaTemplate.send("notificationTopic",
+//                OrderPlacedEvent.builder()
+//                        .orderNumber(order.getOrderNumber())
+//                        .customerId(order.getCustomerId())
+//                        .customerEmail(customer.getEmail())           // ← from step 1
+//                        .customerName(customer.getFirstName())  // ← attach customer
+//                        .build()
+//        );
+
+        log.info("Order {} created with Razorpay order ID: {}", order.getOrderNumber(), razorpayOrderId);
+        // Return razorpay details to client so they can open payment UI
+        return OrderResponse.builder()
+                .orderNumber(order.getOrderNumber())
+                .customerId(order.getCustomerId())
+                .status(order.getStatus())
+                .totalPrice(order.getTotalPrice())
+                .razorpayOrderId(razorpayOrderId)
+                .amountInPaise(order.getTotalPrice()
+                        .multiply(BigDecimal.valueOf(100))
+                        .longValue())
+                .build();
+    }
+
+
+    // ─────────────────────────────────────────────────────
+    // called by PaymentService after webhook confirms payment
+    // This is where inventory deduction and kafka event happen
+    // ─────────────────────────────────────────────────────
+    public void confirmOrderAfterPayment(String razorpayOrderId, String razorpayPaymentId) {
+        Order order = orderRepository.findByRazorpayOrderId(razorpayOrderId)
+                .orElseThrow(() -> new OrderNotFoundException(
+                        "No order found for Razorpay order ID: " + razorpayOrderId));
+
+        // Guard: don't process twice if webhook fires multiple times
+        if (order.getStatus() == OrderStatus.CONFIRMED) {
+            log.warn("Order {} already confirmed, ignoring duplicate webhook", order.getOrderNumber());
+            return;
+        }
+
+        // Now deduct inventory — only after payment confirmed
+        reduceInventory(order.getOrderLineItemsList());
 
         order.setStatus(OrderStatus.CONFIRMED);
+        order.setRazorpayPaymentId(razorpayPaymentId);
         orderRepository.save(order);
+
+        // Fetch customer for email
+        CustomerResponse customer = validateAndFetchCustomer(order.getCustomerId());
+
         kafkaTemplate.send("notificationTopic",
                 OrderPlacedEvent.builder()
                         .orderNumber(order.getOrderNumber())
                         .customerId(order.getCustomerId())
-                        .customerEmail(customer.getEmail())           // ← from step 1
-                        .customerName(customer.getFirstName())  // ← attach customer
+                        .customerEmail(customer.getEmail())
+                        .customerName(customer.getFirstName())
                         .build()
         );
 
-        return "Order Placed Successfully";
+        log.info("Order {} confirmed after payment {}", order.getOrderNumber(), razorpayPaymentId);
+    }
+
+    // ─────────────────────────────────────────────────────
+    //  handle payment failure from webhook
+    // ─────────────────────────────────────────────────────
+    public void handlePaymentFailure(String razorpayOrderId) {
+        Order order = orderRepository.findByRazorpayOrderId(razorpayOrderId)
+                .orElseThrow(() -> new OrderNotFoundException(
+                        "No order found for Razorpay order ID: " + razorpayOrderId));
+
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+
+        log.warn("Order {} cancelled due to payment failure", order.getOrderNumber());
     }
 
     // ──────────────────────────────────────────────
     // Private Helpers
     // ──────────────────────────────────────────────
+
+    private String createRazorpayOrder(BigDecimal totalPrice, String orderNumber) {
+        try {
+            JSONObject orderRequest = new JSONObject();
+            // Razorpay works in paise — multiply by 100
+            orderRequest.put("amount", totalPrice.multiply(BigDecimal.valueOf(100)).intValue());
+            orderRequest.put("currency", "INR");
+            orderRequest.put("receipt", orderNumber);   // your internal order number
+
+            com.razorpay.Order razorpayOrder = razorpayClient.orders.create(orderRequest);
+            return razorpayOrder.get("id");             // returns "order_ABC123"
+
+        } catch (RazorpayException e) {
+            log.error("Failed to create Razorpay order for {}: {}", orderNumber, e.getMessage());
+            throw new PaymentException("Failed to initiate payment. Please try again.");
+        }
+    }
 
 
     // fetches full customer, returns it for reuse

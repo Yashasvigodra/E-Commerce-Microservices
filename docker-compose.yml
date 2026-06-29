@@ -105,14 +105,14 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
 
-  ## Tracing — Jaeger (since you confirmed this is what's running)
+  ## Tracing — Jaeger 
   jaeger:
     image: jaegertracing/all-in-one:1.57
     container_name: jaeger
     ports:
       - "16686:16686"  # UI
       - "4317:4317"    # OTLP gRPC
-      - "4318:4318"    # OTLP HTTP — services send traces straight here now
+      - "4318:4318"    # OTLP HTTP — services send traces straight here 
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
@@ -191,7 +191,7 @@ services:
       - discovery-server
       - api-gateway
 
-  ## Customer-Service (NEW)
+  ## Customer-Service
   customer-service:
     container_name: customer-service
     image: yashasvigodra/customer-service:1.0.0
